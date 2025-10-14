@@ -16,12 +16,14 @@
 #
 # You should have received a copy of the GNU Affero General Public License along
 # with this program. If not, see <http://www.gnu.org/licenses/>.
-#
 
-class ScheduleCustomDataJsonbCopy < ActiveRecord::Migration[7.0]
+class BackfillPortfolioTargetLinkUri < ActiveRecord::Migration[7.2]
   tag :postdeploy
 
   def up
-    DataFixup::CopyCustomDataToJsonb.run
+    DataFixup::Lti::BackfillPortfolioTargetLinkUri.delay_if_production(
+      priority: Delayed::LOW_PRIORITY,
+      n_strand: "long_datafixups"
+    ).run
   end
 end

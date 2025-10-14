@@ -26,6 +26,7 @@ import {TextArea} from '@instructure/ui-text-area'
 import {Button, IconButton} from '@instructure/ui-buttons'
 import {Spinner} from '@instructure/ui-spinner'
 import {IconPlayLine, IconXLine, IconRefreshLine} from '@instructure/ui-icons'
+import {ScreenReaderContent} from '@instructure/ui-a11y-content'
 import doFetchApi from '@canvas/do-fetch-api-effect'
 import type {LLMConversationMessage, LLMConversationViewProps} from '../../types'
 
@@ -38,7 +39,7 @@ interface ContinueConversationResponse {
 const LLMConversationView: React.FC<LLMConversationViewProps> = ({
   isOpen,
   onClose: _onClose,
-  returnFocusRef: _returnFocusRef,
+  returnFocusRef,
   courseId,
   aiExperienceId,
   aiExperienceTitle: _aiExperienceTitle,
@@ -52,16 +53,14 @@ const LLMConversationView: React.FC<LLMConversationViewProps> = ({
   const [inputValue, setInputValue] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [isInitializing, setIsInitializing] = useState(false)
-  const messagesEndRef = useRef<HTMLDivElement>(null)
+  const [lastMessageElement, setLastMessageElement] = useState<HTMLElement | null>(null)
+  const [screenReaderAnnouncement, setScreenReaderAnnouncement] = useState('')
   const closeButtonRef = useRef<HTMLButtonElement>(null)
-
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({behavior: 'smooth'})
-  }
+  const textAreaRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
-    scrollToBottom()
-  }, [messages])
+    lastMessageElement?.scrollIntoView({behavior: 'smooth', block: 'start'})
+  }, [messages, lastMessageElement])
 
   useEffect(() => {
     if (isOpen && isExpanded && messages.length === 0) {
@@ -73,6 +72,37 @@ const LLMConversationView: React.FC<LLMConversationViewProps> = ({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, isExpanded])
+
+  // Announce new Assistant messages to screen readers
+  useEffect(() => {
+    if (messages.length === 0) return
+
+    const lastMessage = messages[messages.length - 1]
+    if (lastMessage?.role === 'Assistant' && !isLoading) {
+      setScreenReaderAnnouncement(I18n.t('Assistant: %{message}', {message: lastMessage.text}))
+
+      // Move focus to the last message briefly, then back to textarea
+      if (lastMessageElement) {
+        lastMessageElement.focus()
+        setTimeout(() => {
+          textAreaRef.current?.focus({preventScroll: true})
+        }, 100)
+      }
+    }
+  }, [messages, isLoading, lastMessageElement])
+
+  // Announce loading states
+  useEffect(() => {
+    if (isLoading) {
+      setScreenReaderAnnouncement(I18n.t('Assistant is thinking...'))
+    }
+  }, [isLoading])
+
+  useEffect(() => {
+    if (isInitializing) {
+      setScreenReaderAnnouncement(I18n.t('Initializing conversation...'))
+    }
+  }, [isInitializing])
 
   const initializeConversation = async () => {
     setIsInitializing(true)
@@ -140,6 +170,10 @@ const LLMConversationView: React.FC<LLMConversationViewProps> = ({
     setMessages([])
     setInputValue('')
     initializeConversation()
+    // Focus textarea after restart
+    setTimeout(() => {
+      textAreaRef.current?.focus({preventScroll: true})
+    }, 100)
   }
 
   if (!isOpen) return null
@@ -163,6 +197,12 @@ const LLMConversationView: React.FC<LLMConversationViewProps> = ({
             onToggleExpanded?.()
           }
         }}
+        elementRef={(el: Element | null) => {
+          if (el && returnFocusRef) {
+            // @ts-expect-error - returnFocusRef expects HTMLElement but View gives Element
+            returnFocusRef.current = el
+          }
+        }}
       >
         <Flex gap="small" alignItems="center">
           <IconPlayLine size="small" />
@@ -182,6 +222,9 @@ const LLMConversationView: React.FC<LLMConversationViewProps> = ({
   // Expanded state - full conversation interface
   return (
     <View as="div" borderWidth="small" borderRadius="medium" overflowX="hidden" overflowY="hidden">
+      <div aria-live="polite" aria-atomic="true">
+        <ScreenReaderContent>{screenReaderAnnouncement}</ScreenReaderContent>
+      </div>
       {/* Preview header section */}
       <View as="div" padding="medium" background="primary" borderWidth="0 0 small 0">
         <Flex gap="small" alignItems="center" justifyItems="space-between">
@@ -191,6 +234,10 @@ const LLMConversationView: React.FC<LLMConversationViewProps> = ({
                 onToggleExpanded?.()
                 setMessages([])
                 setInputValue('')
+                // Return focus to the element that opened the chat
+                setTimeout(() => {
+                  returnFocusRef?.current?.focus()
+                }, 100)
               }}
               size="small"
               withBackground={false}
@@ -222,7 +269,15 @@ const LLMConversationView: React.FC<LLMConversationViewProps> = ({
 
       {/* Chat conversation section */}
       <View as="div" padding="medium" background="secondary">
-        <View as="div" height="400px" overflowY="auto" margin="0 0 medium 0">
+        <View
+          as="div"
+          height="400px"
+          overflowY="auto"
+          margin="0 0 medium 0"
+          padding="xx-small"
+          role="log"
+          aria-label={I18n.t('Conversation messages')}
+        >
           {isInitializing ? (
             <Flex justifyItems="center" alignItems="center" height="100%">
               <Spinner renderTitle={I18n.t('Initializing conversation...')} />
@@ -231,19 +286,39 @@ const LLMConversationView: React.FC<LLMConversationViewProps> = ({
             <>
               {messages.slice(1).map((message, index) => {
                 const isUser = message.role === 'User'
+                const isLastMessage = index === messages.slice(1).length - 1
+                const isLastAssistantMessage = isLastMessage && !isUser
                 return (
-                  <Flex key={index} justifyItems={isUser ? 'end' : 'start'} margin="small 0">
+                  <View
+                    key={index}
+                    as="div"
+                    display="block"
+                    margin="small 0"
+                    textAlign={isUser ? 'end' : 'start'}
+                    elementRef={
+                      isLastMessage
+                        ? (el: Element | null) => setLastMessageElement(el as HTMLElement)
+                        : undefined
+                    }
+                  >
                     <View
                       as="div"
-                      maxWidth="75%"
+                      display="inline-block"
+                      maxWidth="70%"
                       padding="small"
                       background={isUser ? 'primary' : undefined}
                       borderRadius="medium"
                       borderWidth={isUser ? 'small' : undefined}
+                      role="article"
+                      aria-label={
+                        isUser ? I18n.t('Your message') : I18n.t('Message from Assistant')
+                      }
+                      tabIndex={isLastAssistantMessage ? -1 : undefined}
+                      textAlign="start"
                     >
                       <Text>{message.text}</Text>
                     </View>
-                  </Flex>
+                  </View>
                 )
               })}
               {isLoading && (
@@ -251,7 +326,6 @@ const LLMConversationView: React.FC<LLMConversationViewProps> = ({
                   <Spinner renderTitle={I18n.t('Thinking...')} size="small" />
                 </View>
               )}
-              <div ref={messagesEndRef} />
             </>
           )}
         </View>
@@ -279,6 +353,9 @@ const LLMConversationView: React.FC<LLMConversationViewProps> = ({
                 placeholder={I18n.t('Your answer...')}
                 height="60px"
                 disabled={isLoading || isInitializing}
+                textareaRef={(el: HTMLTextAreaElement | null) => {
+                  ;(textAreaRef as React.MutableRefObject<HTMLTextAreaElement | null>).current = el
+                }}
               />
             </Flex.Item>
             <Flex.Item>

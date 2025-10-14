@@ -442,6 +442,9 @@ CanvasRails::Application.routes.draw do
       get :lockdown_browser_required
     end
 
+    # Route alias for AMS activity_builder to quizzes index
+    get "quizzes/activity_builder/:id" => "quizzes/quizzes#index", :as => :quiz_activity_builder
+
     resources :collaborations
     get "lti_collaborations" => "collaborations#lti_index"
     get "lti_collaborations/*all" => "collaborations#lti_index"
@@ -1254,6 +1257,11 @@ CanvasRails::Application.routes.draw do
       put "courses/:course_id/ai_experiences/:id", action: :update
       delete "courses/:course_id/ai_experiences/:id", action: :destroy, as: "course_ai_experience_destroy"
       post "courses/:course_id/ai_experiences/:id/continue_conversation", action: :continue_conversation, as: "course_ai_experience_continue_conversation"
+    end
+
+    scope(controller: :microfrontends_release_tag_override) do
+      get "microfrontends/release_tag_override", action: :create, as: :microfrontends_release_tag_override
+      delete "microfrontends/release_tag_override", action: :destroy
     end
 
     scope(controller: :account_calendars_api) do
@@ -2076,6 +2084,7 @@ CanvasRails::Application.routes.draw do
       get "accounts/:account_id/lti_registrations/:id/overlay_history", action: :overlay_history
       get "accounts/:account_id/lti_registrations/:id/history", action: :history, as: :lti_registration_history
       get "accounts/:account_id/lti_registration_by_client_id/:client_id", action: :show_by_client_id
+      put "accounts/:account_id/lti_registrations/:id/update_requests/:update_request_id/apply", action: :apply_registration_update_request, as: "apply_lti_registration_update_request"
       put "accounts/:account_id/lti_registrations/:id", action: :update
       put "accounts/:account_id/lti_registrations/:id/reset", action: :reset
       post "accounts/:account_id/lti_registrations/:id/bind", action: :bind

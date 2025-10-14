@@ -2855,11 +2855,6 @@ class CoursesController < ApplicationController
 
     return unless authorized_action(account, @current_user, :create_courses)
 
-    unless copy_course_authorized?(@current_user, @context)
-      render status: :forbidden, template: "shared/errors/403_message"
-      return
-    end
-
     # For warnings messages previous to export
     warnings = @context.export_warnings
     js_env(EXPORT_WARNINGS: warnings) unless warnings.empty?
@@ -3400,7 +3395,8 @@ class CoursesController < ApplicationController
         params_for_update[:start_at] = nil if @course.unpublished?
         params_for_update[:conclude_at] = nil
       end
-      can_change_csp = @course.account.grants_right?(@current_user, session, :manage_courses_admin)
+
+      can_change_csp = @course.can_update_csp_settings?(@current_user, session)
       disable_csp = params_for_update.delete(:disable_csp)
       if can_change_csp && !disable_csp.nil?
         if value_to_boolean(disable_csp)

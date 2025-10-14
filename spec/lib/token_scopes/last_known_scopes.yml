@@ -235,6 +235,8 @@
   path: '/api/v1/accounts/:account_id/lti_registrations/:id/overlay_history'
 - verb: PUT
   path: '/api/v1/accounts/:account_id/lti_registrations/:id/reset'
+- verb: PUT
+  path: '/api/v1/accounts/:account_id/lti_registrations/:id/update_requests/:update_request_id/apply'
 - verb: GET
   path: '/api/v1/accounts/:account_id/lti_registrations/:registration_id/controls'
 - verb: DELETE
@@ -1947,6 +1949,10 @@
   path: '/api/v1/media_objects/:media_object_id/media_tracks'
 - verb: PUT
   path: '/api/v1/media_objects/:media_object_id/media_tracks'
+- verb: DELETE
+  path: '/api/v1/microfrontends/release_tag_override'
+- verb: GET
+  path: '/api/v1/microfrontends/release_tag_override'
 - verb: DELETE
   path: '/api/v1/outcomes/:id'
 - verb: GET

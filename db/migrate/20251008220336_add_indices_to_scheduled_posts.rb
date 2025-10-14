@@ -1,6 +1,5 @@
 # frozen_string_literal: true
 
-#
 # Copyright (C) 2025 - present Instructure, Inc.
 #
 # This file is part of Canvas.
@@ -16,13 +15,22 @@
 #
 # You should have received a copy of the GNU Affero General Public License along
 # with this program. If not, see <http://www.gnu.org/licenses/>.
-#
 
-module DataFixup::CopyCustomDataToJsonb
-  def self.run
-    # Skip if data is empty or data_json has already been modified before this fixup runs
-    CustomData.where.not(data: [nil, {}]).where(data_json: {}).find_each(strategy: :id) do |custom_data|
-      custom_data.update_column(:data_json, custom_data["data"])
-    end
+class AddIndicesToScheduledPosts < ActiveRecord::Migration[7.2]
+  tag :predeploy
+  disable_ddl_transaction!
+
+  def change
+    add_index :scheduled_posts,
+              [:post_comments_at, :post_comments_ran_at],
+              algorithm: :concurrently,
+              if_not_exists: true,
+              name: "index_scheduled_posts_on_pending_comments"
+
+    add_index :scheduled_posts,
+              [:post_grades_at, :post_grades_ran_at],
+              algorithm: :concurrently,
+              if_not_exists: true,
+              name: "index_scheduled_posts_on_pending_grades"
   end
 end

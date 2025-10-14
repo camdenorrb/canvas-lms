@@ -2862,12 +2862,12 @@ describe CoursesController do
       expect(assigns[:course]).to eql(@course)
     end
 
-    it "transforms a unix timestamp to nil" do
+    it "returns a 400 if the start_at date is a unix timestamp" do
       user_session(@teacher)
       put "update", params: { id: @course.id, course: { start_at: 1.day.from_now.to_i, name: "Updated" } }, as: :json
-      expect(response).to be_successful
-      @course.reload
-      expect(@course.start_at).to be_nil
+      expect(response).to have_http_status :bad_request
+      json = response.parsed_body
+      expect(json["errors"]["start_at"][0]["message"]).to eq "must be in ISO8601 format"
     end
 
     it "updates some settings and stuff" do
@@ -3923,6 +3923,17 @@ describe CoursesController do
         put "update", params: { id: @course.id, course: { disable_csp: "0" } }
         @course.reload
         expect(@course.csp_enabled?).to be_truthy
+      end
+
+      it "does not update the csp setting when csp is locked" do
+        @account.lock_csp!
+        account_admin_user(active_all: true, account: @account)
+        user_session(@admin)
+
+        put "update", params: { id: @course.id, course: { disable_csp: "1" } }
+        @course.reload
+        expect(@course.csp_enabled?).to be_truthy
+        @account.unlock_csp!
       end
 
       it "does not update the csp setting when not admin" do

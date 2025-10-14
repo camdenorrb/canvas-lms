@@ -3782,6 +3782,33 @@ describe UsersController do
       expect(user2.reload.access_tokens.take.permanent_expires_at).to be_nil
     end
 
+    it "does not allow admins to expire mobile sessions for users in other accounts" do
+      other_account = Account.create!(name: "Other Account")
+      other_user = user_with_pseudonym(active_all: true, account: other_account)
+      add_mobile_access_token(other_user)
+
+      user_session(admin)
+      delete "expire_mobile_sessions", params: { id: other_user.id }, format: :json
+
+      expect(response).to have_http_status :not_found
+      expect(other_user.reload.access_tokens.take.permanent_expires_at).to be_nil
+    end
+
+    it "allows admin to expire mobile sessions for everyone except active admins" do
+      other_admin = account_admin_user(user: user_with_pseudonym, active_all: true)
+      add_mobile_access_token(other_admin)
+
+      user2.account_users.create! account: Account.default, workflow_state: "deleted"
+      add_mobile_access_token(user2)
+
+      user_session(admin)
+      delete "expire_mobile_sessions", params: { skip_admins: "1" }, format: :json
+      expect(response).to have_http_status :ok
+      expect(user.reload.access_tokens.take.permanent_expires_at).to be <= Time.zone.now
+      expect(user2.reload.access_tokens.take.permanent_expires_at).to be <= Time.zone.now
+      expect(other_admin.reload.access_tokens.take.permanent_expires_at).to be_nil
+    end
+
     it "only expires access tokens associated to mobile app developer keys" do
       dev_key = DeveloperKey.create!(name: "dev key")
       user2.access_tokens.create!(developer_key: dev_key)
