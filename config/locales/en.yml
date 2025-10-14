@@ -342,6 +342,10 @@ en:
       month: Month
       second: Seconds
       year: Year
+  permissions:
+    hints:
+      default: "You need the %{permission} permission. Ask an admin in %{scope} to enable it through Admin > Permissions or adjust your role to include it."
+      default_scope: "your Canvas account"
   support:
     array:
       words_connector: ", "
