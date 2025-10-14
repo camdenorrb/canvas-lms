@@ -1,5 +1,9 @@
 # frozen_string_literal: true
 
+require "tmpdir"
+require "digest"
+require "fileutils"
+
 #
 # Copyright (C) 2016 - present Instructure, Inc.
 #
@@ -184,5 +188,90 @@ describe BrandableCSS do
       oldfile: "db/migrate/*_#{migration_name}_postdeploy.rb",
       newfile: postdeploy_file
     )
+  end
+
+  describe ".ensure_default_asset_files!" do
+    around do |example|
+      Dir.mktmpdir do |dir|
+        original_app_root = BrandableCSS::APP_ROOT
+        BrandableCSS.send(:remove_const, :APP_ROOT)
+        BrandableCSS.const_set(:APP_ROOT, Pathname.new(dir))
+        begin
+          example.run
+        ensure
+          BrandableCSS.send(:remove_const, :APP_ROOT)
+          BrandableCSS.const_set(:APP_ROOT, original_app_root)
+        end
+      end
+    end
+
+    it "copies default assets into the brandable css default directory" do
+      app_root = BrandableCSS::APP_ROOT
+      FileUtils.mkdir_p(app_root.join("public/images/login"))
+
+      {
+        "images/mobile-global-nav-logo.svg" => "<svg></svg>",
+        "images/canvas_logomark_only@2x.png" => "png",
+        "favicon.ico" => "ico",
+        "apple-touch-icon.png" => "png",
+        "images/windows-tile.png" => "png",
+        "images/windows-tile-wide.png" => "png",
+        "images/login/canvas-logo.svg" => "<svg></svg>",
+        "images/footer-logo@2x.png" => "footer2x",
+        "images/footer-logo.png" => "footer",
+        "fonts/lato/extended/Lato-Regular.woff2" => "regular",
+        "fonts/lato/extended/Lato-Bold.woff2" => "bold",
+        "fonts/lato/extended/Lato-Italic.woff2" => "italic",
+        "fonts/instructure_icons/Line/InstructureIcons-Line.woff2" => "woff2",
+        "fonts/instructure_icons/Line/InstructureIcons-Line.woff" => "woff",
+      }.each do |relative, contents|
+        target = app_root.join("public", relative)
+        FileUtils.mkdir_p(target.dirname)
+        File.write(target, contents)
+      end
+
+      Dir.chdir(app_root) do
+        BrandableCSS.ensure_default_asset_files!
+      end
+
+      %w[
+        mobile-global-nav-logo.svg
+        images/mobile-global-nav-logo.svg
+        canvas_logomark_only@2x.png
+        images/canvas_logomark_only@2x.png
+        favicon.ico
+        images/favicon.ico
+        apple-touch-icon.png
+        images/apple-touch-icon.png
+        windows-tile.png
+        images/windows-tile.png
+        windows-tile-wide.png
+        images/windows-tile-wide.png
+        login/canvas-logo.svg
+        images/login/canvas-logo.svg
+      ].each do |relative|
+        expect(
+          app_root.join("public/dist/brandable_css/default", relative)
+        ).to exist
+      end
+
+      {
+        "fonts/lato/extended/Lato-Regular.woff2" => "fonts/lato/extended",
+        "fonts/lato/extended/Lato-Bold.woff2" => "fonts/lato/extended",
+        "fonts/lato/extended/Lato-Italic.woff2" => "fonts/lato/extended",
+        "fonts/instructure_icons/Line/InstructureIcons-Line.woff2" => "fonts/instructure_icons/Line",
+        "fonts/instructure_icons/Line/InstructureIcons-Line.woff" => "fonts/instructure_icons/Line",
+        "images/footer-logo@2x.png" => "images",
+        "images/footer-logo.png" => "images",
+      }.each do |relative, dest_dir|
+        source = app_root.join("public", relative)
+        digest = Digest::MD5.file(source).hexdigest[0, 10]
+        ext = File.extname(relative)
+        basename = File.basename(relative, ext)
+        expect(
+          app_root.join("public/dist", dest_dir, "#{basename}-#{digest}#{ext}")
+        ).to exist
+      end
+    end
   end
 end
