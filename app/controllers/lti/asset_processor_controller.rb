@@ -74,7 +74,11 @@ module Lti
     def require_access_to_context
       return if context.is_a?(Course) && context.grants_any_right?(@current_user, session, :manage_grades, :view_all_grades)
 
-      render status: :forbidden, plain: "invalid_request"
+      render_asset_processor_error(
+        :forbidden,
+        "missing_required_permission",
+        :missing_required_permission
+      )
     end
 
     # Format: <student_id> or "anonymous:<anonymous_id>"
@@ -119,6 +123,26 @@ module Lti
 
     def require_submission
       not_found unless student && assignment.assigned?(student)
+    end
+
+    def render_asset_processor_error(http_status, code, message_key)
+      message = I18n.t(
+        "lti.asset_processor.errors.#{message_key}",
+        default: "Invalid request"
+      )
+
+      respond_to do |format|
+        format.json do
+          render json: {
+                   errors: [
+                     { message:, error_code: code }
+                   ]
+                 },
+                 status: http_status
+        end
+        format.html { render plain: message, status: http_status }
+        format.any { render plain: message, status: http_status }
+      end
     end
   end
 end
