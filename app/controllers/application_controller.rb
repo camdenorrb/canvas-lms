@@ -1200,8 +1200,13 @@ class ApplicationController < ActionController::Base
   #   render
   # end
   def authorized_action(object, actor, rights, all_rights: false)
-    can_do = object.send(all_rights ? :grants_all_rights? : :grants_any_right?, actor, session, *Array(rights), with_justifications: true)
+    rights_array = Array(rights)
+    can_do = object.send(all_rights ? :grants_all_rights? : :grants_any_right?, actor, session, *rights_array, with_justifications: true)
     unless can_do.success?
+      store_permission_failure(object, rights_array)
+      if request.format.html? && @missing_permissions_hint.present?
+        flash.now[:error] ||= @missing_permissions_hint
+      end
       if can_do.justifications.present?
         # Even if there are multiple justifications, we can only reasonably handle one at a time,
         # so just arbitrarily choose the first one
@@ -1240,6 +1245,65 @@ class ApplicationController < ActionController::Base
     )
   end
 
+  def store_permission_failure(object, rights_array)
+    rights_syms = rights_array.map { |right| right.respond_to?(:to_sym) ? right.to_sym : right }.compact
+    return if rights_syms.empty?
+
+    @missing_permission_keys ||= []
+    @missing_permission_keys |= rights_syms
+
+    @missing_permissions_hint ||= build_permission_hint(rights_syms, object)
+  end
+  private :store_permission_failure
+
+  def build_permission_hint(rights_syms, object)
+    primary_right = rights_syms.first
+    permission_label = permission_label_for(primary_right)
+    scope_label = permission_scope_label_for(object)
+
+    I18n.t(
+      "permissions.hints.default",
+      permission: permission_label,
+      permission_key: primary_right,
+      scope: scope_label
+    )
+  end
+  private :build_permission_hint
+
+  def permission_label_for(permission)
+    label = RoleOverride.permissions[permission]&.dig(:label)
+
+    value =
+      if label.respond_to?(:call)
+        label.call
+      elsif label.is_a?(String)
+        label
+      end
+
+    value.presence || permission.to_s.tr("_", " ").capitalize
+  rescue StandardError
+    permission.to_s.tr("_", " ").capitalize
+  end
+  private :permission_label_for
+
+  def permission_scope_label_for(object)
+    account =
+      if object.respond_to?(:root_account) && object.root_account
+        object.root_account
+      elsif object.respond_to?(:account) && object.account
+        object.account
+      elsif defined?(@domain_root_account) && @domain_root_account
+        @domain_root_account
+      end
+
+    if account.respond_to?(:name) && account.name.present?
+      account.name
+    else
+      I18n.t("permissions.hints.default_scope", default: "your Canvas account")
+    end
+  end
+  private :permission_scope_label_for
+
   def render_unauthorized_action
     respond_to do |format|
       @show_left_side = false
@@ -1249,6 +1313,9 @@ class ApplicationController < ActionController::Base
       @headers = !!@current_user if @headers != false
       @files_domain = @account_domain && @account_domain.host_type == "files"
       format.any(:html, :pdf) do
+        if request.format.html? && @missing_permissions_hint.present?
+          flash.now[:error] ||= @missing_permissions_hint
+        end
         return unless fix_ms_office_redirects
 
         store_location
@@ -2167,11 +2234,18 @@ class ApplicationController < ActionController::Base
     else
       status_code_string = if status_code.is_a?(Symbol)
                              status_code.to_s
-                           else
-                             # we want to return a status string of the form "not_found", so take the rails-style "Not Found" and tweak it
-                             interpret_status(status_code).sub(/\d\d\d /, "").delete(" ").underscore
+      else
+        # we want to return a status string of the form "not_found", so take the rails-style "Not Found" and tweak it
+        interpret_status(status_code).sub(/\d\d\d /, "").delete(" ").underscore
                            end
       data = { errors: [{ message: "An error occurred.", error_code: status_code_string }] }
+    end
+    if @missing_permissions_hint.present?
+      data[:errors] ||= []
+      data[:errors] << {
+        message: @missing_permissions_hint,
+        required_permissions: @missing_permission_keys&.map(&:to_s)
+      }
     end
     data
   end
