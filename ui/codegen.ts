@@ -41,7 +41,6 @@ const config: CodegenConfig = {
       },
       config: {
         enumsAsTypes: true,
-        dedupeOperationSuffix: true,
       },
     },
   },
