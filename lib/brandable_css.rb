@@ -17,6 +17,9 @@
 # You should have received a copy of the GNU Affero General Public License along
 # with this program. If not, see <http://www.gnu.org/licenses/>.
 
+require "digest"
+require "fileutils"
+
 module BrandableCSS
   APP_ROOT = (defined?(Rails) && Rails.root) || Pathname.pwd
   CONFIG = YAML.load_file(APP_ROOT.join("config/brandable_css.yml")).freeze
@@ -229,9 +232,135 @@ module BrandableCSS
       move_default_to_s3_if_enabled!(type, high_contrast)
     end
 
+    DEFAULT_ASSET_MAPPINGS = {
+      "images/mobile-global-nav-logo.svg" => [
+        "mobile-global-nav-logo.svg",
+        "images/mobile-global-nav-logo.svg",
+      ],
+      "images/canvas_logomark_only@2x.png" => [
+        "canvas_logomark_only@2x.png",
+        "images/canvas_logomark_only@2x.png",
+      ],
+      "favicon.ico" => [
+        "favicon.ico",
+        "images/favicon.ico",
+      ],
+      "apple-touch-icon.png" => [
+        "apple-touch-icon.png",
+        "images/apple-touch-icon.png",
+      ],
+      "images/windows-tile.png" => [
+        "windows-tile.png",
+        "images/windows-tile.png",
+      ],
+      "images/windows-tile-wide.png" => [
+        "windows-tile-wide.png",
+        "images/windows-tile-wide.png",
+      ],
+      "images/login/canvas-logo.svg" => [
+        "login/canvas-logo.svg",
+        "images/login/canvas-logo.svg",
+      ],
+    }.freeze
+
+    FINGERPRINTED_ASSETS = {
+      "fonts/lato/extended/Lato-Regular.woff2" => "fonts/lato/extended",
+      "fonts/lato/extended/Lato-Bold.woff2" => "fonts/lato/extended",
+      "fonts/lato/extended/Lato-Italic.woff2" => "fonts/lato/extended",
+      "fonts/instructure_icons/Line/InstructureIcons-Line.woff2" => "fonts/instructure_icons/Line",
+      "fonts/instructure_icons/Line/InstructureIcons-Line.woff" => "fonts/instructure_icons/Line",
+      "images/footer-logo@2x.png" => "images",
+      "images/footer-logo.png" => "images",
+    }.freeze
+
     def save_default_files!
       [true, false].each do |high_contrast|
         %w[js css json].each { |type| save_default!(type, high_contrast) }
+      end
+
+      ensure_default_asset_files!
+    end
+
+    def ensure_default_asset_files!
+      DEFAULT_ASSET_MAPPINGS.each do |source_relative, targets|
+        source_path = APP_ROOT.join("public", source_relative)
+        unless source_path.exist?
+          log_brandable_warning("Default asset source missing", source_path: source_path)
+          next
+        end
+
+        Array(targets).each do |target_relative|
+          dest_path = default_brand_folder.join(target_relative)
+          next if dest_path.exist? && dest_path.mtime >= source_path.mtime
+
+          dest_path.dirname.mkpath
+          FileUtils.cp(source_path, dest_path)
+        rescue StandardError => e
+          log_brandable_warning(
+            "Failed copying default asset",
+            source_path: source_path,
+            dest_path: dest_path,
+            error: e.message
+          )
+        end
+      end
+
+      ensure_fingerprinted_assets!
+    end
+
+    def ensure_fingerprinted_assets!
+      FINGERPRINTED_ASSETS.each do |source_relative, dest_dir|
+        source_path = APP_ROOT.join("public", source_relative)
+        unless source_path.exist?
+          log_brandable_warning("Fingerprint asset source missing", source_path: source_path)
+          next
+        end
+
+        digest = Digest::MD5.file(source_path).hexdigest[0, 10]
+        ext = File.extname(source_relative)
+        basename = File.basename(source_relative, ext)
+        fingerprinted_name = "#{basename}-#{digest}#{ext}"
+        dest_path = APP_ROOT.join("public/dist", dest_dir, fingerprinted_name)
+
+        next if dest_path.exist? && dest_path.mtime >= source_path.mtime
+
+        dest_path.dirname.mkpath
+        FileUtils.cp(source_path, dest_path)
+      rescue StandardError => e
+        log_brandable_warning(
+          "Failed copying fingerprint asset",
+          source_path: source_path,
+          dest_path: dest_path,
+          error: e.message
+        )
+      end
+    end
+
+    def log_brandable_warning(message, context = {})
+      return unless defined?(Rails) && Rails.respond_to?(:logger) && Rails.logger
+
+      Rails.logger.warn("[BrandableCSS] #{message} #{context.compact}")
+    end
+
+    def ensure_default_file!(type, high_contrast = false)
+      ensure_default_asset_files!
+
+      if defined?(Canvas::Cdn) && Canvas::Cdn.respond_to?(:enabled?) && Canvas::Cdn.enabled?
+        # When CDN uploads are active the defaults live on S3 and local files are
+        # deleted after upload, so avoid regenerating them on every request.
+        return
+      end
+
+      type = type.to_s
+      file = default_brand_file(type, high_contrast)
+      return if file.exist?
+
+      begin
+        save_default!(type, high_contrast)
+      rescue StandardError => e
+        Rails.logger.warn(
+          "[BrandableCSS] failed to backfill default #{type} (high_contrast=#{high_contrast}): #{e.message}"
+        ) if defined?(Rails) && Rails.respond_to?(:logger) && Rails.logger
       end
     end
 
@@ -251,6 +380,7 @@ module BrandableCSS
     end
 
     def public_default_path(type, high_contrast = false)
+      ensure_default_file!(type, high_contrast)
       "dist/brandable_css/default/variables#{"-high_contrast" if high_contrast}-#{default_variables_md5}.#{type}"
     end
 
