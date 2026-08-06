@@ -36,6 +36,21 @@ module Lti
   # end
   # ```
   module LaunchServices
+    extend ActiveSupport::Concern
+
+    class UnsupportedLaunchMessageType < StandardError
+      attr_reader :message_type
+
+      def initialize(message_type)
+        super("Unsupported message type: #{message_type}")
+        @message_type = message_type
+      end
+    end
+
+    included do
+      rescue_from UnsupportedLaunchMessageType, with: :render_unsupported_launch_message
+    end
+
     def context
       raise "Abstract Method"
     end
@@ -70,7 +85,7 @@ module Lti
       when LtiAdvantage::Messages::EulaRequest::MESSAGE_TYPE
         adapter.generate_post_payload_for_eula
       else
-        raise "Unsupported message type: #{message_type}"
+        raise UnsupportedLaunchMessageType, message_type
       end
     end
 
@@ -126,6 +141,33 @@ module Lti
 
     def require_1_3_tool
       render status: :bad_request, plain: "Only LTI 1.3 tools support this launch" unless tool.use_1_3?
+    end
+
+    private
+
+    def render_unsupported_launch_message(error)
+      message = I18n.t(
+        "lti.launches.unsupported_message_type",
+        message_type: error.message_type
+      )
+
+      respond_to do |format|
+        format.json do
+          render json: {
+                   errors: [
+                     { message:, error_code: "unsupported_message_type", message_type: error.message_type }
+                   ]
+                 },
+                 status: :bad_request
+        end
+        format.html do
+          flash.now[:error] = message
+          render plain: message, status: :bad_request
+        end
+        format.any do
+          render plain: message, status: :bad_request
+        end
+      end
     end
   end
 end

@@ -116,7 +116,11 @@ module Lti
 
     def validate_report_belongs_to_processor
       unless asset_report.asset_processor.id == asset_processor.id
-        render status: :bad_request, plain: "invalid_request"
+        render_launch_error(
+          :bad_request,
+          "report_mismatch",
+          :report_mismatch
+        )
       end
     end
 
@@ -126,6 +130,26 @@ module Lti
 
     def require_report_view_permission
       render_unauthorized_action unless asset_report.visible_to_user?(@current_user)
+    end
+
+    def render_launch_error(http_status, code, message_key)
+      message = I18n.t(
+        "lti.asset_processor.errors.#{message_key}",
+        default: "Invalid request"
+      )
+
+      respond_to do |format|
+        format.json do
+          render json: {
+                   errors: [
+                     { message:, error_code: code }
+                   ]
+                 },
+                 status: http_status
+        end
+        format.html { render plain: message, status: http_status }
+        format.any { render plain: message, status: http_status }
+      end
     end
   end
 end
